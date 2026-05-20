@@ -21,11 +21,13 @@ func RegisterRoutes(router *mux.Router, db *sql.DB, redisClient *redis.Client, c
 	callRepo := repositories.NewCallRepository(db)
 	conversationRepo := repositories.NewConversationRepository(db)
 	smsRepo := repositories.NewSMSRepository(db)
+	subRepo := repositories.NewSubscriptionRepository(db)
 
 	// Initialize services
 	authService := services.NewAuthService(userRepo, cfg.JWTSecret)
 	twilioService := services.NewTwilioService(cfg)
 	openaiService := services.NewOpenAIService(cfg.OpenAIAPIKey)
+	stripeService := services.NewStripeService(cfg)
 	conversationService := services.NewConversationService(conversationRepo, smsRepo, openaiService, twilioService)
 	callService := services.NewCallService(callRepo, conversationService)
 
@@ -34,12 +36,16 @@ func RegisterRoutes(router *mux.Router, db *sql.DB, redisClient *redis.Client, c
 	twilioHandler := handlers.NewTwilioHandler(callService, twilioService, locationRepo)
 	conversationHandler := handlers.NewConversationHandler(conversationService)
 	dashboardHandler := handlers.NewDashboardHandler(db)
+	billingHandler := handlers.NewBillingHandler(stripeService, subRepo, orgRepo, cfg.StripeWebhookSecret)
 
 	// Public routes (no auth required)
 	router.HandleFunc("/auth/register", authHandler.Register).Methods("POST")
 	router.HandleFunc("/auth/login", authHandler.Login).Methods("POST")
 
 	// Twilio webhooks (Twilio validates these differently)
+
+	// Stripe webhooks (no auth required, validated by signature)
+	router.HandleFunc("/webhooks/stripe", billingHandler.HandleStripeWebhook).Methods("POST")
 	router.HandleFunc("/webhooks/twilio/voice", twilioHandler.HandleVoiceWebhook).Methods("POST")
 	router.HandleFunc("/webhooks/twilio/sms", twilioHandler.HandleSMSWebhook).Methods("POST")
 	router.HandleFunc("/webhooks/twilio/status", twilioHandler.HandleStatusCallback).Methods("POST")
@@ -72,6 +78,11 @@ func RegisterRoutes(router *mux.Router, db *sql.DB, redisClient *redis.Client, c
 	protected.HandleFunc("/dashboard/stats", dashboardHandler.GetStats).Methods("GET")
 	protected.HandleFunc("/dashboard/analytics", dashboardHandler.GetAnalytics).Methods("GET")
 
+
+	// Billing routes
+	protected.HandleFunc("/billing/subscription", billingHandler.GetSubscription).Methods("GET")
+	protected.HandleFunc("/billing/subscription", billingHandler.CreateSubscription).Methods("POST")
+	protected.HandleFunc("/billing/subscription/cancel", billingHandler.CancelSubscription).Methods("POST")
 	// User routes
 	protected.HandleFunc("/users/me", authHandler.GetMe).Methods("GET")
 	protected.HandleFunc("/users", handlers.NotImplemented).Methods("GET")

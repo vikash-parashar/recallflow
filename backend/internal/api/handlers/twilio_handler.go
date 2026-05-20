@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
-	"github.com/gorilla/mux"
 	"github.com/recallflow/backend/internal/repositories"
 	"github.com/recallflow/backend/internal/services"
 )
